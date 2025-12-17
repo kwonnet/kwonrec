@@ -11,7 +11,7 @@ def get_current_context():
         "current_day": tf.constant([now.weekday()], dtype=tf.int32)
     }
 
-def run_model_similarity_score(model, users: list[str]):
+def run_model_similarity_score(model, users: list[str], single_user: bool):
     print("\n--- Initiated Model Similarity Score ---", flush=True)
     # Use the first two different users
     if len(users) < 2:
@@ -21,8 +21,11 @@ def run_model_similarity_score(model, users: list[str]):
     ctx = get_current_context()
     
     # Prepare feature dictionaries
-    feat1 = {"user_id": tf.constant([users[0]]), **ctx}
-    feat2 = {"user_id": tf.constant([users[1]]), **ctx}
+    feat1 = {"user_id": tf.constant([users[0]])}
+    feat2 = {"user_id": tf.constant([users[1]])}
+    if single_user:
+        feat1 = {**feat1, **ctx}
+        feat2 = {**feat2, **ctx}
 
     # Get their embeddings using the full model (which calls the user_tower)
     # We call the model directly to ensure fusion logic is applied

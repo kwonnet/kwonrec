@@ -18,6 +18,10 @@ class HybridRecommenderModel(tfrs.models.Model):
         self.retrieval_weight = retrieval_weight
 
         # --- 1. DEFINE INDEPENDENT LAYERS ---
+        self.user_model = tf.keras.Sequential([
+            tf.keras.layers.StringLookup(vocabulary=unique_user_ids, mask_token=None),
+            tf.keras.layers.Embedding(len(unique_user_ids) + 1, embedding_dim),
+        ])
         self.user_embedding_layer = tf.keras.Sequential([
             tf.keras.layers.StringLookup(vocabulary=unique_user_ids, mask_token=None),
             tf.keras.layers.Embedding(len(unique_user_ids) + 1, embedding_dim),
@@ -120,7 +124,7 @@ class HybridRecommenderModel(tfrs.models.Model):
         }
         
         # Use the sliced dict for the query side
-        user_embeddings = self.query_model(query_features)
+        user_embeddings = self.user_model(features["user_id"])
         
         # Post side still needs the full 'features' dict for embeddings, age, etc.
         post_embeddings = self.get_candidate_embedding(features)
