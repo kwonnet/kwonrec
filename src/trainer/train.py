@@ -97,7 +97,7 @@ def train_full_pipeline():
     )
    
     scann = tfrs.layers.factorized_top_k.ScaNN(
-        query_model=model.query_model, 
+        query_model=model.user_model, 
         k=100,                          # Return the top 100 items
         num_leaves=100,
         num_leaves_to_search=10,            
