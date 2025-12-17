@@ -1,0 +1,71 @@
+services:
+  api:
+    build: .
+    container_name: tfrs4-api
+    ports:
+      - "8003:8000"   # FastAPI
+      - "6006:6006"   # TensorBoard
+    volumes:
+      - ./src:/app/src
+      - ./logs:/app/logs 
+      - ./serving_model:/app/serving_model
+    depends_on:
+      - redis
+
+  redis:
+    image: redis:7
+    container_name: tfrs4-redis
+    ports:
+      - "6379:6379"
+
+
+
+
+# services:
+#   api:
+#     build: .
+#     container_name: tfrs4-api
+#     ports:
+#       - "8003:8000"
+#     volumes:
+#       - ./src:/app/src
+#       - ./logs:/app/logs  # Add this to persist TensorBoard logs
+      
+#     depends_on:
+#       - redis
+
+#   redis:
+#     image: redis:7
+#     container_name: tfrs4-redis
+#     ports:
+#       - "6379:6379"
+
+#   tensorboard:
+#     image: tensorflow/tensorflow:2.18.0  # Match your TF version
+#     container_name: tfrs4-tensorboard
+#     ports:
+#       - "6006:6006"  # Access TensorBoard at http://localhost:6006
+#     volumes:
+#       - ./logs:/logs  # Mount the same logs directory
+#     command: tensorboard --logdir /logs/fit --host 0.0.0.0 --port 6006
+#     depends_on:
+#       - api  # Optional: start after api (training may generate logs dynamically)
+
+
+# services:
+#   api:
+#     build: .
+#     container_name: tfrs4-api
+#     ports:
+#       - "8003:8000"
+#     volumes:
+#       - ./src:/app/src
+
+#     depends_on:
+#       - redis
+
+#   redis:
+#     image: redis:7
+#     container_name: tfrs4-redis
+#     ports:
+#       - "6379:6379"
