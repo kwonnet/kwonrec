@@ -10,7 +10,7 @@ app = FastAPI()
 
 # Proper logging so you actually see what went wrong
 logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger("rec2")
+logger = logging.getLogger("Kwonrec")
 
 # ─── SAFE BACKGROUND TASK ─────────────────────
 def safe_train_incremental():

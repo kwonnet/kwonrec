@@ -15,7 +15,7 @@ CLICKHOUSE_DB = os.getenv("CLICKHOUSE_DB")
 REDIS_HOST = os.getenv("REDIS_HOST", "localhost")
 REDIS_PORT = int(os.getenv("REDIS_PORT", 6379))
 
-TRAINING_INTERVAL_MINUTES = int(os.getenv("TRAINING_INTERVAL_MINUTES", 500))
+TRAINING_INTERVAL_MINUTES = int(os.getenv("TRAINING_INTERVAL_MINUTES", 200))
 
 EXPLORATION_RATE = float(os.getenv("EXPLORATION_RATE", 0.1))
 
@@ -29,11 +29,11 @@ NUM_EPOCHS = 10
 
 LEARNING_RATE = 0.005 # LEARNING_RATE is higher for Adagrad (e.g., 0.1 or 0.5) than for Adam (e.g., 0.001).
 
-RATING_WEIGHT = 1.0
+RATING_WEIGHT = 1.2
 
-RETRIEVAL_WEIGHT = 1.0
+RETRIEVAL_WEIGHT = 1.8
 
-# checkpoints
+# checkpoints 🚀🏆
 
 CHECKPOINT_DIR = os.getenv("CHECKPOINT_DIR", "/app/checkpoints")
 

@@ -24,20 +24,15 @@ def get_recommendations(user_id: str, limit: int):
     
     # Convert the user_id to the expected TensorFlow constant/tensor format
 
-    now = datetime.now()
-    scores_raw, post_ids_raw = scann({
-        "current_hour": tf.constant([now.hour], dtype=tf.int32),
-        "current_day": tf.constant([now.weekday()], dtype=tf.int32),
-        "user_id": tf.constant([user_id])
-    })
-
-    # scores_raw, post_ids_raw = scann(tf.constant([user_id]))
+    scores_raw, post_ids_raw = scann(tf.constant([user_id]))
     
     # Flatten the tensor output to standard Python lists
     post_ids = post_ids_raw.numpy().flatten().tolist()[:limit]
     scores = scores_raw.numpy().flatten().tolist()[:limit]
     
     # --- END LIMIT FIX ---
+
+    print(f"Recommended - {len(post_ids)} - posts", flush=True)
     
     recommendations = [
         {"id": post_id, "score": score}

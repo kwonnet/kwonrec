@@ -65,40 +65,52 @@ def fetch_new_interactions() -> pd.DataFrame:
 
 
 def convert_df_to_tf_dataset(df: pd.DataFrame):
-
     result = tf.data.Dataset.from_tensor_slices({
-        'user_id': df['user_id'].values.astype(str),      # -> tf.string
-        'post_id': df['post_id'].values.astype(str),      # -> tf.string
-        'author_id': df['author_id'].values.astype(str),  # -> tf.string
-        
-        'label': df['label'].values.astype(np.float32),   # -> tf.float32
-        'weight': df['weight'].values.astype(np.float32), # -> tf.float32
-        
-        # embedding: np.stack converts the list of (384,) arrays into a single (N, 384) array
-        # Shape: [384] -> (Batch size, 384)
-        'embedding': np.array(df['embedding'].tolist(), dtype=np.float32), 
-        
-        'post_age_hours': df['post_age_hours'].values.astype(np.float32), # -> tf.float32
-        'post_created_hour': df['post_created_hour'].values.astype(np.int32), # -> tf.int32 (Changed from uint8 for safety)
-        'post_day_of_week': df['post_day_of_week'].values.astype(np.int32),   # -> tf.int32 (Changed from uint8 for safety)
-        'current_hour': df['timestamp'].dt.hour.values.astype(np.int32),
-        'current_day': df['timestamp'].dt.dayofweek.values.astype(np.int32),
+        'user_id': df['user_id'].values.astype(str),          # tf.string
+        'post_id': df['post_id'].values.astype(str),          # tf.string
+        'author_id': df['author_id'].values.astype(str),      # tf.string (if used elsewhere)
+
+        'label': df['label'].values.astype(np.float32),       # tf.float32
+        'weight': df['weight'].values.astype(np.float32),     # tf.float32 (now decayed)
+
+        # Post content embedding (384-dim)
+        'embedding': np.array(df['embedding'].tolist(), dtype=np.float32),
+
+        # Historical age: how old the post was WHEN the user interacted
+        'post_age_hours_interaction': df['post_age_hours_interaction'].values.astype(np.float32),
+
+        # Current age: how old the post is RIGHT NOW (also used in training for consistency)
+        'current_age_hours': df['current_age_hours'].values.astype(np.float32),
+
+        # Static post timing features
+        'post_created_hour': df['post_created_hour'].values.astype(np.int32),
+        'post_day_of_week': df['post_day_of_week'].values.astype(np.int32),
     })
     return result
 
 def convert_df_to_tf_candidate_ds(df: pd.DataFrame):
-    candidate_df = df.drop_duplicates(subset=['post_id'])
-    # Ensure all embeddings are the same length and convert to a clean 2D numpy array
+    # Use only unique posts to avoid duplicates in the candidate set
+    candidate_df = df.drop_duplicates(subset=['post_id']).copy()
+
     candidates_ds = tf.data.Dataset.from_tensor_slices({
-        'post_id': candidate_df['post_id'].values,
+        'post_id': candidate_df['post_id'].values.astype(str),
+
+        'author_id': candidate_df['author_id'].values.astype(str),
+        # Post content embedding
         'embedding': np.array(candidate_df['embedding'].tolist(), dtype=np.float32),
-        'post_age_hours': candidate_df['post_age_hours'].values.astype(np.float32),
+
+        # Current age at the time of indexing/serving → critical for recency bias
+        'current_age_hours': candidate_df['current_age_hours'].values.astype(np.float32),
+
+        # Static features
         'post_created_hour': candidate_df['post_created_hour'].values.astype(np.int32),
         'post_day_of_week': candidate_df['post_day_of_week'].values.astype(np.int32),
+
+        # Optional: zero-fill historical age since it's not used at inference
+        # This allows the same get_candidate_embedding logic to work without errors
+        'post_age_hours_interaction': np.zeros(len(candidate_df), dtype=np.float32),
     })
     return candidates_ds
-
-
 
 
 def prepare_stratified_datasets(df: pd.DataFrame, test_ratio: float = 0.2, val_ratio: float = 0.1):
@@ -106,125 +118,65 @@ def prepare_stratified_datasets(df: pd.DataFrame, test_ratio: float = 0.2, val_r
     df['timestamp'] = pd.to_datetime(df['timestamp'], utc=True)
     df['post_created_at'] = pd.to_datetime(df['post_created_at'], utc=True)
     
-    # 2. Establish "Now" as a UTC-aware anchor
+    # 2. Establish "Now" as a UTC-aware anchor (used for decay and current age)
     now = pd.Timestamp.now(tz='UTC')
 
-    # 3. RE-CALCULATE TIME FEATURES FOR TRAINING
-    # post_age_hours: How old was the post AT THE TIME of the interaction?
-    df['post_age_hours'] = (df['timestamp'] - df['post_created_at']).dt.total_seconds() / 3600
-    df['post_age_hours'] = np.log1p(df['post_age_hours'].clip(lower=0))
-    
-    # post_created_hour and day (derived once, applicable to both)
-    df['post_created_hour'] = df['post_created_at'].dt.hour
-    df['post_day_of_week'] = df['post_created_at'].dt.dayofweek
+    # 3. Calculate historical post age AT THE TIME OF INTERACTION (for training)
+    df['post_age_hours_interaction'] = (df['timestamp'] - df['post_created_at']).dt.total_seconds() / 3600
+    df['post_age_hours_interaction'] = np.log1p(df['post_age_hours_interaction'].clip(lower=0))
 
-    # 4. APPLY TEMPORAL DECAY
-    # Weight interactions based on how far they are from "Now"
+    # 4. Static post features (same for training and inference)
+    df['post_created_hour'] = df['post_created_at'].dt.hour.astype('uint8')
+    df['post_day_of_week'] = df['post_created_at'].dt.dayofweek.astype('uint8')
+
+    # 5. APPLY TEMPORAL DECAY TO INTERACTION WEIGHTS → Focus on recent user behavior
     df['days_old_from_now'] = (now - df['timestamp']).dt.total_seconds() / 86400
-    decay_lambda = 0.05 
-    # df['weight'] = df['weight'] * np.exp(-decay_lambda * df['days_old_from_now'])
+    decay_lambda = 0.05  # Tune this: 0.03 (slow decay) to 0.1 (strong recency)
+    df['weight'] = df['weight'] * np.exp(-decay_lambda * df['days_old_from_now'])
+    
+    # === STRONGER NEGATIVE HANDLING ===
+    positive_mask = df['weight'] > 0
+    negative_mask = df['weight'] < 0
 
-    # 5. Stratified Split
+    # Positives: gentle floor to avoid vanishing
+    df.loc[positive_mask, 'weight'] = df.loc[positive_mask, 'weight'].clip(lower=0.01)
+
+    # Negatives: amplify + preserve full strength
+    df.loc[negative_mask, 'weight'] = df.loc[negative_mask, 'weight'] * 2.0   # or 3.0 for very strong repulsion
+    
+    # Current age = how old the post is RIGHT NOW (for recency at inference)
+    df['current_age_hours'] = (now - df['post_created_at']).dt.total_seconds() / 3600
+    df['current_age_hours'] = np.log1p(df['current_age_hours'].clip(lower=0))
+
+    # 6. Stratified Split (by user)
     train_val_df, test_df = train_test_split(
-        df, 
-        test_size=test_ratio,
-        stratify=df['user_id'],
-        random_state=42
+        df, test_size=test_ratio, stratify=df['user_id'], random_state=42
     )
-    
     train_df, val_df = train_test_split(
-        train_val_df, 
-        test_size=val_ratio,
-        stratify=train_val_df['user_id'],
-        random_state=42
+        train_val_df, test_size=val_ratio / (1 - test_ratio),
+        stratify=train_val_df['user_id'], random_state=42
     )
-    
-    # 6. Convert to TF Datasets for Training/Evaluation
-    # (These use the 'post_age_hours' from the time of interaction)
+
+    # 7. Convert to TF Datasets
     train_ds = convert_df_to_tf_dataset(train_df)
     val_ds = convert_df_to_tf_dataset(val_df)
     test_ds = convert_df_to_tf_dataset(test_df)
-    
-    # Candidate dataset for training task
-    train_candidates_ds = convert_df_to_tf_candidate_ds(train_df)
 
-    # 7. RE-CALCULATE AGE FOR SCANN INDEX (The "Right Now" Age)
-    # We update the 'post_age_hours' for the entire DF to reflect 
-    # their actual age at this exact moment of indexing.
-    df['post_age_hours'] = (now - df['post_created_at']).dt.total_seconds() / 3600
-    df['post_age_hours'] = np.log1p(df['post_age_hours'].clip(lower=0))
-    
-    # Create the final library of candidates
+    # Candidate datasets
+    train_candidates_ds = convert_df_to_tf_candidate_ds(train_df)   
     all_candidates_ds = convert_df_to_tf_candidate_ds(df)
 
-    # Vocabularies
+    # 8. Vocabularies
     unique_user_ids = np.unique(df['user_id'].values)
     unique_post_ids = np.unique(df['post_id'].values)
+    unique_author_ids = np.unique(df['author_id'].values)
 
     return (
-        train_ds, 
-        val_ds, 
-        test_ds, 
-        train_candidates_ds, 
-        all_candidates_ds, 
-        unique_user_ids, 
-        unique_post_ids
+        train_ds, val_ds, test_ds,
+        train_candidates_ds, all_candidates_ds,
+        unique_user_ids, unique_post_ids, unique_author_ids
     )
 
-# def prepare_stratified_datasets(df: pd.DataFrame, test_ratio: float = 0.2, val_ratio: float = 0.1):
-#     """
-#     Prepares interactions and candidates tf.data.Datasets from a DataFrame,
-#     ensuring their tensor specifications align with the desired output signature.
-    
-#     Args:
-#         df (pd.DataFrame): DataFrame containing interaction and post features.
-        
-#     Returns:
-#         tuple: (interactions_ds, candidates_ds, unique_users, unique_posts)
-#     """
-
-#     # First, split into train+val and test (stratify by user_id)
-#     train_val_df, test_df = train_test_split(
-#         df, 
-#         test_size=test_ratio,
-#         stratify=df['user_id'],  # Or use 'post_id' if preferred
-#         random_state=42  # For reproducibility
-#     )
-    
-#     # Then, split train_val into train and val (stratify again)
-#     train_df, val_df = train_test_split(
-#         train_val_df, 
-#         test_size=val_ratio,  # ~12.3% of train_val for val (146/(1453-268) ≈10% overall)
-#         stratify=train_val_df['user_id'],  # Consistent stratification
-#         random_state=42
-#     )
-    
-#     # convert tf dataset
-
-#     train_ds = convert_df_to_tf_dataset(train_df)
-#     val_ds = convert_df_to_tf_dataset(val_df)
-#     test_ds = convert_df_to_tf_dataset(test_df)
-
-#     # df to candidate dataset (Post-level features)
-#     all_candidates_ds = convert_df_to_tf_candidate_ds(df)
-    
-#     train_candidates_ds = convert_df_to_tf_candidate_ds(train_df)
-
-#     # Unique users and posts for vocabularies
-#     unique_user_ids = np.unique(df['user_id'].values)
-#     unique_post_ids = np.unique(df['post_id'].values)
-
-#     total_rows = len(df)
-
-#     print(f"Total Interactions: {total_rows}", flush=True)
-    
-#     print(f"Interactions in Test Set: {len(test_df)} ({len(test_df)/total_rows:.1%})", flush=True)
-#     print(f"Interactions in Validation Set: {len(val_df)} ({len(val_df)/total_rows:.1%})", flush=True)
-#     print(f"Interactions in Training Set: {len(train_df)} ({len(train_df)/total_rows:.1%})", flush=True)
-
-#     # Return all datasets and uniques
-#     return train_ds, val_ds, test_ds, train_candidates_ds, all_candidates_ds, unique_user_ids, unique_post_ids
-    
 
 def stratified_dataset_split(
     df: pd.DataFrame, 

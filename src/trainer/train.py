@@ -5,7 +5,7 @@ from datetime import datetime
 from ..config import (LEARNING_RATE, NUM_EPOCHS,  MAPPINGS_PATH, SCANN_INDEX_PATH, MODEL_SERVING_PATH, MODEL_WEIGHTS_PATH, RATING_WEIGHT, RETRIEVAL_WEIGHT, BATCH_SIZE, LOG_DIR
 )
 from .data_loader import fetch_new_interactions, prepare_stratified_datasets, user_based__dataset_split, stratified_dataset_split
-from .helpers import  run_diversity_test, run_cold_start_test, run_scann_search_test, run_model_similarity_score, run_time_context_test
+from .helpers import  run_diversity_test, run_cold_start_test, run_scann_search_test, run_model_similarity_score
 from ..models.model import HybridRecommenderModel
 import tensorflow as tf
 import tensorflow_recommenders as tfrs
@@ -19,7 +19,7 @@ def train_full_pipeline():
         print("No new interactions. Skipping training.")
         return
     # stratified dataset split
-    train_ds, val_ds, test_ds, train_candidates_ds, all_candidates_ds, unique_user_ids, unique_post_ids = prepare_stratified_datasets(df)
+    train_ds, val_ds, test_ds, train_candidates_ds, all_candidates_ds, unique_user_ids, unique_post_ids, unique_author_ids = prepare_stratified_datasets(df)
 
     # stratified dataset split
     # train_ds, val_ds, test_ds, train_candidates_ds, all_candidates_ds, unique_user_ids, unique_post_ids = stratified_dataset_split(df)
@@ -30,7 +30,7 @@ def train_full_pipeline():
     cached_test =  test_ds.batch(BATCH_SIZE).cache().prefetch(tf.data.AUTOTUNE)
 
     # candidate ds
-    candidates_ds =  train_candidates_ds.batch(BATCH_SIZE).prefetch(tf.data.AUTOTUNE)
+    indexing_candidates_ds =  train_candidates_ds.batch(BATCH_SIZE).prefetch(tf.data.AUTOTUNE)
 
     # Initialize or load model
     model = HybridRecommenderModel(
@@ -38,17 +38,19 @@ def train_full_pipeline():
         retrieval_weight=RETRIEVAL_WEIGHT,
         unique_user_ids=unique_user_ids, 
         unique_post_ids=unique_post_ids,
-        candidates_ds=candidates_ds)
+        unique_author_ids=unique_author_ids,
+        candidates_ds=indexing_candidates_ds)
 
-    if os.path.exists(MODEL_WEIGHTS_PATH):
-        model.load_weights(MODEL_WEIGHTS_PATH)
-        print("Loaded previous model weights for incremental training.")
+    # if os.path.exists(MODEL_WEIGHTS_PATH):
+    #     model.load_weights(MODEL_WEIGHTS_PATH)
+    #     print("Loaded previous model weights for incremental training.")
     
-    # Compile
+    # # Compile
+    # learning_rate = LEARNING_RATE if not os.path.exists(MODEL_WEIGHTS_PATH) else LEARNING_RATE * 0.5
     model.compile(optimizer=tf.keras.optimizers.Adam(LEARNING_RATE))
 
     # early stopping callback
-    early_stopping = tf.keras.callbacks.EarlyStopping(
+    early_stopping_callback = tf.keras.callbacks.EarlyStopping(
         # monitor='val_factorized_top_k/top_100_categorical_accuracy',
         monitor='val_factorized_top_k/top_50_categorical_accuracy',
         # monitor='val_loss',
@@ -64,6 +66,15 @@ def train_full_pipeline():
         embeddings_freq=1,  # If you log embeddings (see optional below)
         update_freq='epoch'  # Log at epoch end for efficiency
     )
+
+    # saving weights
+    checkpoint_callback = tf.keras.callbacks.ModelCheckpoint(
+        filepath=MODEL_WEIGHTS_PATH,
+        monitor='val_factorized_top_k/top_50_categorical_accuracy',
+        save_best_only=True,
+        save_weights_only=True,
+        verbose=1
+    )
     
     print("About to train HybridRecommenderModel", flush=True)
     # Train incrementally
@@ -72,7 +83,7 @@ def train_full_pipeline():
         validation_data=cached_val, 
         epochs=NUM_EPOCHS, 
         verbose=1,
-        callbacks=[early_stopping, tensorboard_callback]
+        callbacks=[early_stopping_callback, tensorboard_callback, checkpoint_callback]
     )
 
     print("About to evaluate HybridRecommenderModel", flush=True)
@@ -88,7 +99,7 @@ def train_full_pipeline():
     
     # Build index for serving (ScaNN for efficiency)
     # Build the (post_id, embedding) dataset for ScaNN
-    candidate_embeddings_ds = all_candidates_ds.batch(128).map(
+    candidate_embeddings_ds = all_candidates_ds.batch(BATCH_SIZE).prefetch(tf.data.AUTOTUNE).map(
         # model.get_candidate_embedding
         lambda x: (
             x['post_id'],
@@ -118,8 +129,6 @@ def train_full_pipeline():
     # Perform cold start test
     run_cold_start_test(scann, unique_user_ids[0])
 
-    # Perform time context aware
-    run_time_context_test(scann, unique_user_ids[0])
 
     # Save model and index
     # tf.saved_model.save(model, MODEL_SERVING_PATH)

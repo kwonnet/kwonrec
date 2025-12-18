@@ -9,6 +9,7 @@ services:
       - ./src:/app/src
       - ./logs:/app/logs 
       - ./serving_model:/app/serving_model
+      - ./checkpoints:/app/checkpoints
     depends_on:
       - redis
 

@@ -1,52 +1,31 @@
 import numpy as np
 import pandas as pd
 import tensorflow as tf
-from datetime import datetime
 
-def get_current_context():
-    """Helper to provide current time context for the model"""
-    now = datetime.now()
-    return {
-        "current_hour": tf.constant([now.hour], dtype=tf.int32),
-        "current_day": tf.constant([now.weekday()], dtype=tf.int32)
-    }
-
-def run_model_similarity_score(model, users: list[str], single_user: bool):
+def run_model_similarity_score(model, users: list[str]):
     print("\n--- Initiated Model Similarity Score ---", flush=True)
     # Use the first two different users
     if len(users) < 2:
         print("Not enough users for similarity test.")
         return
 
-    ctx = get_current_context()
-    
-    # Prepare feature dictionaries
-    feat1 = {"user_id": tf.constant([users[0]])}
-    feat2 = {"user_id": tf.constant([users[1]])}
-    if single_user:
-        feat1 = {**feat1, **ctx}
-        feat2 = {**feat2, **ctx}
-
     # Get their embeddings using the full model (which calls the user_tower)
     # We call the model directly to ensure fusion logic is applied
-    emb1 = model.query_model(feat1)
-    emb2 = model.query_model(feat2)
+    emb1 = model.user_model(tf.constant([users[0]]))
+    emb2 = model.user_model(tf.constant([users[1]]))
 
     # Check the distance between them
     cosine_sim = tf.reduce_sum(tf.multiply(emb1, emb2))
     print(f"Similarity Score: {cosine_sim.numpy()}", flush=True)
 
 
-def run_scann_search_test(scann, known_user_id):
+def run_scann_search_test(scann, user_id):
     """
     Initiate scann search so that the saved version can work when loaded 
     """
     print("\n--- Initiated Scann Search Test ---", flush=True)
-    
-    ctx = get_current_context()
-    query = {"user_id": tf.constant([known_user_id]), **ctx}
-    
-    scores, post_ids = scann(query, k=1)
+        
+    scores, post_ids = scann(tf.constant([user_id]), k=1)
 
     score = scores.numpy()[0][0]
     post_id = post_ids.numpy()[0][0].decode('utf-8')
@@ -57,11 +36,9 @@ def run_scann_search_test(scann, known_user_id):
 def run_diversity_test(scann, user_ids, k=10):
     print("\n--- Running Diversity Test ---", flush=True)
     all_recs = {}
-    ctx = get_current_context()
     
     for uid in user_ids:
-        query = {"user_id": tf.constant([uid]), **ctx}
-        _, post_ids = scann(query, k=k)
+        _, post_ids = scann(tf.constant([uid]), k=k)
         
         all_recs[uid] = set([pid.decode('utf-8') if isinstance(pid, bytes) else str(pid) 
                              for pid in post_ids[0].numpy()])
@@ -89,13 +66,11 @@ def run_diversity_test(scann, user_ids, k=10):
         print("ℹ️ MODERATE: Balanced personalization.", flush=True)
 
 
-def run_cold_start_test(scann, known_user_id):
-    print("\n--- Running Cold Start Test ---", flush=True)
-    ctx = get_current_context()
-    
+def run_cold_start_test(scann, user_id):
+    print("\n--- Running Cold Start Test ---", flush=True)    
     # 1. New User ID + Context
-    new_user_query = {"user_id": tf.constant(["brand_new_user_999"]), **ctx}
-    existing_user_query = {"user_id": tf.constant([known_user_id]), **ctx}
+    new_user_query = tf.constant(["brand_new_user_999"])
+    existing_user_query = tf.constant([user_id])
     
     # 2. Get recommendations
     scores_new, ids_new = scann(new_user_query, k=10)
@@ -108,7 +83,7 @@ def run_cold_start_test(scann, known_user_id):
     # 4. Analyze Overlap
     intersection = set(new_recs).intersection(set(old_recs))
     
-    print(f"Known User ({known_user_id}) Top 3: {old_recs[:3]}", flush=True)
+    print(f"Known User ({user_id}) Top 3: {old_recs[:3]}", flush=True)
     print(f"New User (Cold Start) Top 3: {new_recs[:3]}", flush=True)
     print(f"\nOverlap between Known and New User: {len(intersection)} posts", flush=True)
     
@@ -116,38 +91,3 @@ def run_cold_start_test(scann, known_user_id):
         print("⚠️ RESULT: High Overlap.", flush=True)
     else:
         print("✅ RESULT: Personalization working.", flush=True)
-
-
-def run_time_context_test(scann, known_user_id):
-    print("\n--- Running Time Context Test ---")
-    
-    # 1. Same user, but at 8:00 AM (Morning)
-    morning_ctx = {
-        "user_id": tf.constant([known_user_id]),
-        "current_hour": tf.constant([8], dtype=tf.int32),
-        "current_day": tf.constant([1], dtype=tf.int32) # Monday
-    }
-    
-    # 2. Same user, but at 11:00 PM (Night)
-    night_ctx = {
-        "user_id": tf.constant([known_user_id]),
-        "current_hour": tf.constant([23], dtype=tf.int32),
-        "current_day": tf.constant([1], dtype=tf.int32)
-    }
-    
-    _, ids_morning = scann(morning_ctx, k=5)
-    _, ids_night = scann(night_ctx, k=5)
-    
-    recs_morning = [pid.decode('utf-8') for pid in ids_morning[0].numpy()]
-    recs_night = [pid.decode('utf-8') for pid in ids_night[0].numpy()]
-    
-    intersection = set(recs_morning).intersection(set(recs_night))
-    
-    print(f"Morning Recs: {recs_morning}")
-    print(f"Night Recs:   {recs_night}")
-    print(f"Overlap between times: {len(intersection)}/5")
-    
-    if len(intersection) == 5:
-        print("❌ RESULT: Zero Time-Sensitivity. The model ignores the clock.")
-    else:
-        print("✅ RESULT: Context-Aware. The model changes results based on time.")
