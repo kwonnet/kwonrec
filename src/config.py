@@ -15,7 +15,7 @@ CLICKHOUSE_DB = os.getenv("CLICKHOUSE_DB")
 REDIS_HOST = os.getenv("REDIS_HOST", "localhost")
 REDIS_PORT = int(os.getenv("REDIS_PORT", 6379))
 
-TRAINING_INTERVAL_MINUTES = int(os.getenv("TRAINING_INTERVAL_MINUTES", 200))
+TRAINING_INTERVAL_MINUTES = int(os.getenv("TRAINING_INTERVAL_MINUTES", 500))
 
 EXPLORATION_RATE = float(os.getenv("EXPLORATION_RATE", 0.1))
 
@@ -39,6 +39,8 @@ CHECKPOINT_DIR = os.getenv("CHECKPOINT_DIR", "/app/checkpoints")
 
 MODEL_WEIGHTS_PATH = os.getenv("MODEL_WEIGHTS_PATH", "/app/checkpoints/model.weights.h5")
 
+USER_MODEL_PATH = os.getenv("USER_MODEL_PATH", "/app/checkpoints/user_model")
+
 # for serving
 
 SERVING_DIR = os.getenv("SERVING_DIR", "/app/serving_model")
@@ -48,6 +50,8 @@ MODEL_SERVING_PATH = os.getenv("MODEL_SERVING_PATH", "/app/serving_model/model")
 MAPPINGS_PATH = os.getenv("MAPPINGS_PATH", "/app/serving_model/mappings.pkl")
 
 SCANN_INDEX_PATH = os.getenv("SCANN_INDEX_PATH", "/app/serving_model/scann")
+
+USER_EMB_PREFIX = "user_emb:v1:"  # versioned in case model changes
 
 #  Logs
 

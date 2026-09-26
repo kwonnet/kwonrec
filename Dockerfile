@@ -14,6 +14,9 @@ COPY requirements.txt .
 # 2. RUN pip install (The variable is available here for any build steps)
 RUN pip install --no-cache-dir -r requirements.txt
 
+# Download spaCy small English model
+RUN python -m spacy download en_core_web_sm
+
 COPY . .
 
 # FastAPI

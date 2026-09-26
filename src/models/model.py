@@ -119,7 +119,7 @@ class HybridRecommenderModel(tfrs.models.Model):
         user_embeddings, post_embeddings, rate_predictions = self(features)
         
         rate_loss = self.rating_task(labels=labels, predictions=rate_predictions)
-        
         retrieval_loss = self.retrieval_task(user_embeddings, post_embeddings)
         
         return self.rating_weight * rate_loss + self.retrieval_weight * retrieval_loss
+

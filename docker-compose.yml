@@ -4,69 +4,56 @@ services:
     container_name: api
     ports:
       - "8003:8000"   # FastAPI
-      - "6006:6006"   # TensorBoard
+      - "6006:6006"   # TensorBoard (exposed from the app container)
     volumes:
       - ./src:/app/src
-      - ./logs:/app/logs 
+      - ./logs:/app/logs
       - ./serving_model:/app/serving_model
       - ./checkpoints:/app/checkpoints
     depends_on:
-      - redis
+      redis:
+        condition: service_healthy
+      # timescaledb:
+      #   condition: service_healthy
+    environment:
+      - REDIS_HOST=redis
+      - POSTGRES_HOST=timescaledb
+      # Add other env vars as needed, e.g.:
+      # - POSTGRES_USER=postgres
+      # - POSTGRES_PASSWORD=your_secure_password
+      # - POSTGRES_DB=your_db_name
 
   redis:
-    image: redis:7
+    image: redis:7-alpine
     container_name: redis
     ports:
       - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    volumes:
+      - redis_data:/data
 
+  # timescaledb:
+  #   image: timescale/timescaledb-ha:pg18
+  #   container_name: timescaledb
+  #   ports:
+  #     - "5433:5432"
+  #   environment:
+  #     POSTGRES_USER: postgres          # change if you want custom user
+  #     POSTGRES_PASSWORD: 12345678  # CHANGE THIS!
+  #     POSTGRES_DB: kwonnet           # or whatever you prefer
+  #   healthcheck:
+  #     test: ["CMD-SHELL", "pg_isready -U postgres"]
+  #     interval: 10s
+  #     timeout: 5s
+  #     retries: 10
+  #   volumes:
+  #     - db_data:/var/lib/postgresql/data
+  #   command: ["postgres", "-c", "max_connections=200"]  # optional: increase if needed
 
-
-
-# services:
-#   api:
-#     build: .
-#     container_name: tfrs4-api
-#     ports:
-#       - "8003:8000"
-#     volumes:
-#       - ./src:/app/src
-#       - ./logs:/app/logs  # Add this to persist TensorBoard logs
-      
-#     depends_on:
-#       - redis
-
-#   redis:
-#     image: redis:7
-#     container_name: tfrs4-redis
-#     ports:
-#       - "6379:6379"
-
-#   tensorboard:
-#     image: tensorflow/tensorflow:2.18.0  # Match your TF version
-#     container_name: tfrs4-tensorboard
-#     ports:
-#       - "6006:6006"  # Access TensorBoard at http://localhost:6006
-#     volumes:
-#       - ./logs:/logs  # Mount the same logs directory
-#     command: tensorboard --logdir /logs/fit --host 0.0.0.0 --port 6006
-#     depends_on:
-#       - api  # Optional: start after api (training may generate logs dynamically)
-
-
-# services:
-#   api:
-#     build: .
-#     container_name: tfrs4-api
-#     ports:
-#       - "8003:8000"
-#     volumes:
-#       - ./src:/app/src
-
-#     depends_on:
-#       - redis
-
-#   redis:
-#     image: redis:7
-#     container_name: tfrs4-redis
-#     ports:
-#       - "6379:6379"
+volumes:
+  db_data:      # Persistent volume for TimescaleDB/PostgreSQL data
+  redis_data:   # Persistent volume for Redis data

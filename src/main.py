@@ -1,16 +1,25 @@
 from fastapi import FastAPI
-from .serving import get_recommendations
+from .serving import build_cooccurrence, filter_wrong_phrases, get_classifier, get_content_keywords, get_recommendations, has_non_stopword, kw_model, phrase_coherence_score, restore_phrases_casing
 from apscheduler.schedulers.background import BackgroundScheduler
 import logging
 from .config import TRAINING_INTERVAL_MINUTES
 from .trainer.train import train_full_pipeline
 import uvicorn
+from pydantic import BaseModel
+from typing import List
 
 app = FastAPI()
 
 # Proper logging so you actually see what went wrong
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("Kwonrec")
+
+class ClassificationRequest(BaseModel):
+    text: str
+    labels: List[str]
+
+class ExtractKeywordRequest(BaseModel):
+    text: str
 
 # ─── SAFE BACKGROUND TASK ─────────────────────
 def safe_train_incremental():
@@ -38,6 +47,46 @@ def recs(user_id: str, limit: int = 10):
     except Exception as e:
         logger.error(f"Recommendation failed for {user_id}: {e}")
         raise  # will return e
+
+@app.post("/classify")
+async def classify_text(request: ClassificationRequest):
+    try:
+        classifier = get_classifier()
+        if classifier is None:
+            raise
+        logger.info("Trying to get content topic...")
+        result = classifier(
+            request.text, 
+            request.labels, 
+            hypothesis_template="This text is about {}.",
+            multi_label=False
+        )
+        return {
+            "label": result['labels'][0],
+            "score": result['scores'][0],
+            # "all_results": dict(zip(result['labels'], result['scores']))
+        }
+    except Exception as e:
+        logger.error("Unable to get content topic...")
+        raise
+
+@app.post("/keywords")
+async def extract_keywords(req: ExtractKeywordRequest):
+    try:
+        logger.info("Trying to get content keywords...")
+
+        keywords = get_content_keywords(req.text)
+
+        logger.info(f"Total keywords extracted {len(keywords)}")
+
+        return { "keywords": keywords }
+
+    except Exception as e:
+        logger.error("Unable to get content keywords...")
+        raise
+
+
+
 
 @app.post("/train")
 def trigger_train():

@@ -14,3 +14,7 @@ pydantic
 redis
 pandas
 scikit-learn
+transformers  
+torch
+keybert[spacy]
+sentence_transformers

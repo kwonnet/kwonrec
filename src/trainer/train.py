@@ -2,9 +2,9 @@
 import pickle
 import redis
 from datetime import datetime
-from ..config import (LEARNING_RATE, NUM_EPOCHS,  MAPPINGS_PATH, SCANN_INDEX_PATH, MODEL_SERVING_PATH, MODEL_WEIGHTS_PATH, RATING_WEIGHT, RETRIEVAL_WEIGHT, BATCH_SIZE, LOG_DIR
+from ..config import (LEARNING_RATE, NUM_EPOCHS,  MAPPINGS_PATH, SCANN_INDEX_PATH, MODEL_SERVING_PATH, MODEL_WEIGHTS_PATH, RATING_WEIGHT, RETRIEVAL_WEIGHT, BATCH_SIZE, LOG_DIR, USER_MODEL_PATH, EMBEDDING_DIM
 )
-from .data_loader import fetch_new_interactions, prepare_stratified_datasets, user_based__dataset_split, stratified_dataset_split
+from .data_loader import fetch_new_interactions, stratified_dataset_split
 from .helpers import  run_diversity_test, run_cold_start_test, run_scann_search_test, run_model_similarity_score
 from ..models.model import HybridRecommenderModel
 import tensorflow as tf
@@ -19,7 +19,7 @@ def train_full_pipeline():
         print("No new interactions. Skipping training.")
         return
     # stratified dataset split
-    train_ds, val_ds, test_ds, train_candidates_ds, all_candidates_ds, unique_user_ids, unique_post_ids, unique_author_ids = prepare_stratified_datasets(df)
+    train_ds, val_ds, test_ds, train_candidates_ds, all_candidates_ds, unique_user_ids, unique_post_ids, unique_author_ids = stratified_dataset_split(df)
 
     # stratified dataset split
     # train_ds, val_ds, test_ds, train_candidates_ds, all_candidates_ds, unique_user_ids, unique_post_ids = stratified_dataset_split(df)
@@ -83,7 +83,7 @@ def train_full_pipeline():
         validation_data=cached_val, 
         epochs=NUM_EPOCHS, 
         verbose=1,
-        callbacks=[early_stopping_callback, tensorboard_callback, checkpoint_callback]
+        callbacks=[early_stopping_callback, tensorboard_callback]
     )
 
     print("About to evaluate HybridRecommenderModel", flush=True)
@@ -95,7 +95,7 @@ def train_full_pipeline():
         print(f"{metric}: {value:.4f}")
     
     # Save weights for future incremental training
-    # model.save_weights(MODEL_WEIGHTS_PATH)
+    model.save_weights(MODEL_WEIGHTS_PATH)
     
     # Build index for serving (ScaNN for efficiency)
     # Build the (post_id, embedding) dataset for ScaNN
@@ -110,9 +110,9 @@ def train_full_pipeline():
     scann = tfrs.layers.factorized_top_k.ScaNN(
         query_model=model.user_model, 
         k=100,                          # Return the top 100 items
-        num_leaves=100,
-        num_leaves_to_search=10,            
-        num_reordering_candidates=400,  # Search 400, then pick the best 100
+        num_leaves=300,
+        num_leaves_to_search=50,            
+        num_reordering_candidates=500,  # Search 400, then pick the best 100
         name="recommender"
     )
     scann.index_from_dataset(candidate_embeddings_ds)
@@ -129,20 +129,9 @@ def train_full_pipeline():
     # Perform cold start test
     run_cold_start_test(scann, unique_user_ids[0])
 
-
-    # Save model and index
-    # tf.saved_model.save(model, MODEL_SERVING_PATH)
-    # tf.keras.models.save_model(
-    #     model,
-    #     MODEL_SERVING_PATH,
-    #     overwrite=True,
-    #     include_optimizer=True,
-    #     save_format=None,
-    #     signatures=None,
-    #     options=None
-    # )
-
     print("Saving scann index for inference.........", flush=True)
+    # NEW: Save user tower separately
+    tf.saved_model.save(model.user_model, USER_MODEL_PATH)
 
     tf.saved_model.save(scann, SCANN_INDEX_PATH, options=tf.saved_model.SaveOptions(namespace_whitelist=["Scann"]))
     
