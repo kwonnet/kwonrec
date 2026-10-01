@@ -133,3 +133,22 @@ def test_replay_restores_consumed_rows_to_new_namespace(database, engine):
     replay_retained(connection, fresh)
     assert fresh.redis.hgetall(fresh.user_key("reader", "profile"))
     assert connection.execute('SELECT count(*) AS n FROM kwonrec.outbox WHERE processed_at IS NULL').fetchone()["n"] == 0
+
+
+def test_history_backfill_with_source_column_and_multiple_pages(database, engine):
+    from src.runtime.worker import bootstrap_history
+    connection, _ = database
+    # Match the real PostClick schema's column that conflicts with the SQL alias.
+    connection.execute('ALTER TABLE "PostClick" ADD COLUMN source text')
+    insert_post(connection)
+    for index, source in enumerate(["HOME_FEED", "SEARCH", None]):
+        connection.execute('INSERT INTO "PostClick" (id,"userId","postId",source) VALUES (%s,%s,%s,%s)',
+                           (f"click{index}", "reader", "p", source))
+    # Simulate records written before triggers were installed, in this test DB only.
+    connection.execute("DELETE FROM kwonrec.outbox WHERE kind='interaction'")
+    engine.config.worker_batch = 1
+    bootstrap_history(connection, engine)
+    bootstrap_history(connection, engine)
+    rows = connection.execute("SELECT source_key, payload FROM kwonrec.outbox WHERE kind='interaction' ORDER BY source_key").fetchall()
+    assert [row["source_key"] for row in rows] == [f"PostClick:click{i}" for i in range(3)]
+    assert all(row["payload"]["type"] == "click" and row["payload"]["user_id"] == "reader" for row in rows)

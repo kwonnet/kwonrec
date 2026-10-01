@@ -115,7 +115,9 @@ def bootstrap_history(connection, engine):
     for table, kind in SOURCES.items():
         last = ""
         while True:
-            rows = connection.execute(sql.SQL('''SELECT to_jsonb(source) AS data FROM {} AS source
+            # PostClick has a `source` column. Explicit .* selects the whole row
+            # rather than letting PostgreSQL resolve the alias as that column.
+            rows = connection.execute(sql.SQL('''SELECT to_jsonb(source.*) AS data FROM {} AS source
                 WHERE id > %s AND "createdAt" >= (CURRENT_TIMESTAMP - (%s * interval '1 day'))
                 ORDER BY id LIMIT %s''').format(sql.Identifier(table)),
                 (last, engine.config.event_max_age_days, engine.config.worker_batch)).fetchall()
