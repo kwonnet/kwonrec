@@ -1,35 +1,10 @@
-FROM python:3.10-slim
-
+FROM python:3.12-slim
+ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1
 WORKDIR /app
-
-# ----------------------------------------------------------------------
-# 1. SET THE ENVIRONMENT VARIABLE
-# This ENV instruction makes the variable available to all subsequent 
-# RUN, CMD, and ENTRYPOINT commands, including the 'pip install' step.
-# ----------------------------------------------------------------------
-ENV TF_USE_LEGACY_KERAS="1"
-
 COPY requirements.txt .
-
-# 2. RUN pip install (The variable is available here for any build steps)
-RUN pip install --no-cache-dir -r requirements.txt
-
-# Download spaCy small English model
-RUN python -m spacy download en_core_web_sm
-
-COPY . .
-
-# FastAPI
-
-EXPOSE 8000 
-
-# TensorBoard
-
-EXPOSE 6006
-
-# Start both services:
-# - TensorBoard in background (writes to /app/logs/fit)
-# - Uvicorn in foreground (keeps container alive)
-CMD ["bash", "-c", \
-     "tensorboard --logdir /app/logs/fit --host 0.0.0.0 --port 6006 & \
-      uvicorn src.main:app --host 0.0.0.0 --port 8000 --reload"]
+RUN pip install --no-cache-dir -r requirements.txt && useradd --uid 10001 --create-home app
+COPY --chown=app:app src ./src
+COPY --chown=app:app sql ./sql
+USER app
+EXPOSE 8001
+CMD ["uvicorn", "src.main:app", "--host", "0.0.0.0", "--port", "8001", "--workers", "1", "--limit-concurrency", "256", "--timeout-keep-alive", "5"]

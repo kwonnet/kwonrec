@@ -1,0 +1,97 @@
+# Replace the image with an immutable image digest before applying.
+# Provision Secret kwonrec with KWONREC_API_KEY, KWONREC_REDIS_URL,
+# KWONREC_DATABASE_URL. Redis is external; this does not install a toy in-cluster DB.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: kwonrec-api
+spec:
+  replicas: 3
+  selector:
+    matchLabels: {app: kwonrec-api}
+  template:
+    metadata:
+      labels: {app: kwonrec-api}
+    spec:
+      terminationGracePeriodSeconds: 30
+      securityContext: {runAsNonRoot: true, runAsUser: 10001, fsGroup: 10001}
+      containers:
+        - name: api
+          image: kwonrec:2.0.0
+          ports: [{containerPort: 8001}]
+          envFrom: [{secretRef: {name: kwonrec}}]
+          env:
+            - {name: KWONREC_REDIS_CLUSTER, value: "true"}
+          resources:
+            requests: {cpu: "500m", memory: "256Mi"}
+            limits: {cpu: "2", memory: "1Gi"}
+          readinessProbe:
+            httpGet: {path: /ready, port: 8001}
+            periodSeconds: 5
+          livenessProbe:
+            httpGet: {path: /health, port: 8001}
+            periodSeconds: 10
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: {drop: [ALL]}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: kwonrec
+spec:
+  selector: {app: kwonrec-api}
+  ports: [{port: 8001, targetPort: 8001}]
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: kwonrec-api
+spec:
+  scaleTargetRef: {apiVersion: apps/v1, kind: Deployment, name: kwonrec-api}
+  minReplicas: 3
+  maxReplicas: 30
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target: {type: Utilization, averageUtilization: 65}
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: kwonrec-api
+spec:
+  minAvailable: 2
+  selector:
+    matchLabels: {app: kwonrec-api}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: kwonrec-worker
+spec:
+  replicas: 3
+  selector:
+    matchLabels: {app: kwonrec-worker}
+  template:
+    metadata:
+      labels: {app: kwonrec-worker}
+    spec:
+      terminationGracePeriodSeconds: 45
+      securityContext: {runAsNonRoot: true, runAsUser: 10001}
+      containers:
+        - name: worker
+          image: kwonrec:2.0.0
+          command: [python, -m, src.runtime.worker]
+          envFrom: [{secretRef: {name: kwonrec}}]
+          env:
+            - {name: KWONREC_REDIS_CLUSTER, value: "true"}
+          resources:
+            requests: {cpu: "250m", memory: "128Mi"}
+            limits: {cpu: "1", memory: "512Mi"}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: {drop: [ALL]}

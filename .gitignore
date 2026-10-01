@@ -1,7 +1,9 @@
 .venv
-serving_model
-logs
-src/_pycache__
 .env
+.env.*
+!.env.example
 __pycache__/
 *.py[cod]
+.pytest_cache/
+.ruff_cache/
+.coverage

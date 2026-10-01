@@ -1,0 +1,75 @@
+name: kwonrec-production
+
+x-runtime: &runtime
+  image: kwonrec:${KWONREC_IMAGE_TAG:-vm-local}
+  build:
+    context: ..
+  restart: unless-stopped
+  read_only: true
+  tmpfs: [/tmp]
+  security_opt: [no-new-privileges:true]
+  cap_drop: [ALL]
+  logging:
+    driver: local
+    options:
+      max-size: 10m
+      max-file: '3'
+  depends_on:
+    redis:
+      condition: service_healthy
+
+x-environment: &environment
+  KWONREC_REDIS_URL: redis://redis:6379/0
+  KWONREC_API_KEY: ${KWONREC_API_KEY:?Set the shared service key}
+  KWONREC_NAMESPACE: ${KWONREC_NAMESPACE:-kwonrec:v2}
+  KWONREC_ALLOW_UNAUTHENTICATED: 'false'
+
+services:
+  api:
+    <<: *runtime
+    environment: *environment
+    # Set only to the VM internal IP after configuring private Cloud Run access.
+    ports: ['${KWONREC_BIND_IP:-127.0.0.1}:8001:8001']
+    mem_limit: 768m
+    healthcheck:
+      test: [CMD, python, -c, "import urllib.request; urllib.request.urlopen('http://localhost:8001/ready', timeout=3)"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+  worker:
+    <<: *runtime
+    environment:
+      <<: *environment
+      KWONREC_DATABASE_URL: ${KWONREC_DATABASE_URL:?Set the direct PostgreSQL URL}
+      KWONREC_POLL_SECONDS: ${KWONREC_POLL_SECONDS:-1}
+    command: [python, -m, src.runtime.worker]
+    mem_limit: 768m
+  setup:
+    <<: *runtime
+    restart: 'no'
+    profiles: [setup]
+    environment:
+      <<: *environment
+      KWONREC_DATABASE_URL: ${KWONREC_DATABASE_URL:?Set the direct PostgreSQL URL}
+    command: [python, -m, src.runtime.setup]
+    mem_limit: 768m
+  redis:
+    image: redis:7.4-alpine
+    restart: unless-stopped
+    command: [redis-server, --appendonly, 'yes', --appendfsync, everysec, --maxmemory, 512mb, --maxmemory-policy, noeviction]
+    mem_limit: 1536m
+    volumes: [redis_data:/data]
+    logging:
+      driver: local
+      options:
+        max-size: 10m
+        max-file: '3'
+    healthcheck:
+      test: [CMD, redis-cli, ping]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+volumes:
+  redis_data:

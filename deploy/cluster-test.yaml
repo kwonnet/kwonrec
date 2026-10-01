@@ -1,0 +1,29 @@
+name: kwonrec-cluster-test
+services:
+  redis-a: &redis
+    image: redis:7.4-alpine
+    command: [redis-server, --cluster-enabled, 'yes', --cluster-config-file, nodes.conf, --appendonly, 'no']
+    healthcheck:
+      test: [CMD, redis-cli, ping]
+      interval: 1s
+      timeout: 1s
+      retries: 20
+  redis-b: *redis
+  redis-c: *redis
+  init:
+    image: redis:7.4-alpine
+    command: [redis-cli, --cluster, create, 'redis-a:6379', 'redis-b:6379', 'redis-c:6379', --cluster-replicas, '0', --cluster-yes]
+    profiles: [tools]
+  smoke:
+    image: kwonrec:local-test
+    command: [python, -m, scripts.cluster_smoke]
+    volumes:
+      - ../src:/app/src:ro
+      - ../scripts:/app/scripts:ro
+    environment:
+      TEST_REDIS_CLUSTER_URL: redis://redis-a:6379/0
+    profiles: [tools]
+networks:
+  default:
+    external: true
+    name: kwonrec-test-cluster
