@@ -62,3 +62,36 @@ def test_setup_backfills_only_when_requested(monkeypatch, skip):
     assert history.call_count == (0 if skip else 1)
     assert 'CREATE SCHEMA' in connection.execute.call_args_list[0].args[0]
     engine.redis.close.assert_called_once()
+
+
+def test_setup_failure_reports_outside_redirection_and_restores_worker(tmp_path):
+    """Exercise Bash's real errexit/function/redirection behavior without a VM."""
+    import subprocess
+    script = Path('deploy/compute/deploy.sh').read_text()
+    wrapper = script[script.index('run_setup() {'):script.index('# Install/upgrade triggers each time;')]
+    harness = '''set -Eeuo pipefail
+WORK="$1"
+dc() { echo 'captured setup exception'; return 23; }
+restore_previous() { echo 'recovery invoked' >&2; cat "$WORK/setup.log" >&2; }
+''' + wrapper + '\nrun_setup "Bootstrap probe"\necho UNEXPECTED_SUCCESS\n'
+    result = subprocess.run(['bash', '-c', harness, 'test', str(tmp_path)], capture_output=True, text=True)
+    assert result.returncode == 23
+    assert 'Bootstrap probe' in result.stderr
+    assert 'captured setup exception' in result.stderr
+    assert 'recovery invoked' in result.stderr
+    assert 'UNEXPECTED_SUCCESS' not in result.stdout
+
+
+def test_successful_setup_continues_without_recovery(tmp_path):
+    import subprocess
+    script = Path('deploy/compute/deploy.sh').read_text()
+    wrapper = script[script.index('run_setup() {'):script.index('# Install/upgrade triggers each time;')]
+    harness = '''set -Eeuo pipefail
+WORK="$1"
+dc() { echo 'setup complete'; }
+restore_previous() { echo UNEXPECTED_RECOVERY; }
+''' + wrapper + '\nrun_setup "Bootstrap probe"\necho SUCCESS\n'
+    result = subprocess.run(['bash', '-c', harness, 'test', str(tmp_path)], capture_output=True, text=True)
+    assert result.returncode == 0
+    assert 'SUCCESS' in result.stdout
+    assert 'UNEXPECTED_RECOVERY' not in result.stdout

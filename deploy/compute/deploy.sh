@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Invoked automatically by GitHub Actions on the target Debian/Ubuntu VM.
-set -euo pipefail
+set -Eeuo pipefail
 [[ $EUID -eq 0 ]] || { echo 'Run with sudo.' >&2; exit 1; }
 IMAGE=${1:?Immutable image required}
 [[ "$IMAGE" =~ ^[a-z0-9-]+-docker.pkg.dev/[a-z0-9-]+/kwonnet/kwonrec@sha256:[a-f0-9]{64}$ ]] || { echo 'Unexpected image reference' >&2; exit 2; }
@@ -51,7 +51,9 @@ dc up -d --wait --wait-timeout 90 redis
 # Keep the existing Compose project and volume. Never run "down --volumes".
 restore_previous() {
   echo 'Deployment failed; restoring the previous application release when available.' >&2
-  python3 "$BUNDLE/diagnostics.py" "$WORK/app.env" "$WORK/setup.log" >&2 || true
+  python3 "$BUNDLE/diagnostics.py" "$WORK/app.env" "$WORK/setup.log" > "$ROOT/last-deployment-error.log" 2>&1 || true
+  chmod 600 "$ROOT/last-deployment-error.log"
+  cat "$ROOT/last-deployment-error.log" >&2
   if [[ -f "$ROOT/current/compose.yml" ]]; then
     docker compose --env-file "$ROOT/current/release.env" -f "$ROOT/current/compose.yml" up -d api worker || true
   else
@@ -59,17 +61,33 @@ restore_previous() {
     dc start worker || true
   fi
 }
-trap 'restore_previous' ERR
+trap 'status=$?; trap - ERR; restore_previous; exit "$status"' ERR
 dc stop worker
+# Handle setup failure outside the redirected dc function. Otherwise Bash can
+# exit inside dc without reporting its captured output, then EXIT deletes it.
+run_setup() {
+  local stage="$1"
+  shift
+  echo "Kwonrec deployment: $stage"
+  if dc run --rm setup "$@" >> "$WORK/setup.log" 2>&1; then
+    return 0
+  else
+    local status=$?
+    echo "Kwonrec deployment failed during: $stage (exit $status)" >&2
+    trap - ERR
+    restore_previous
+    exit "$status"
+  fi
+}
 # Install/upgrade triggers each time; backfill only for a new database/Redis namespace.
 if [[ -f "$ROOT/setup-target" && "$(cat "$ROOT/setup-target")" == "$(cat "$WORK/target")" ]]; then
-  dc run --rm setup python -m src.runtime.setup --skip-bootstrap > "$WORK/setup.log" 2>&1
+  run_setup "Install recommendation triggers" python -m src.runtime.setup --skip-bootstrap
 else
-  dc run --rm setup > "$WORK/setup.log" 2>&1
-  dc run --rm setup python -m src.runtime.worker --replay-retained >> "$WORK/setup.log" 2>&1
+  run_setup "Install triggers and bootstrap catalog/history"
+  run_setup "Replay retained interactions" python -m src.runtime.worker --replay-retained
 fi
 # A real outbox batch checks database/Redis integration; worker process liveness alone is insufficient.
-dc run --rm setup python -m src.runtime.worker --once >> "$WORK/setup.log" 2>&1
+run_setup "Verify database outbox processing" python -m src.runtime.worker --once
 dc up -d --wait --wait-timeout 180 api worker
 API=$(dc ps -q api)
 WORKER=$(dc ps -q worker)
