@@ -211,3 +211,15 @@ def test_expired_seen_entries_do_not_block_next_request(engine, post_factory):
     post_factory("p")
     engine.redis.zadd(engine.user_key("reader", "seen"), {"p": time.time() - engine.ttl - 1})
     assert ids(engine.recommend(FeedRequest(user_id="reader"))) == ["p"]
+
+
+def test_redis_connection_pool_is_bounded_and_configurable(monkeypatch):
+    from src.runtime.engine import Engine
+    from unittest.mock import MagicMock
+    client = MagicMock()
+    factory = MagicMock(return_value=client)
+    monkeypatch.setattr('src.runtime.engine.Redis.from_url', factory)
+    Engine(Settings(allow_unauthenticated=True, redis_max_connections=4))
+    assert factory.call_args.kwargs['max_connections'] == 4
+    with pytest.raises(ValidationError):
+        Settings(allow_unauthenticated=True, redis_max_connections=0)

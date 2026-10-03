@@ -1,4 +1,7 @@
-# Compute Engine deployment
+# Manual Compute Engine deployment
+
+For push-to-deploy automation, use the [GitHub Actions guide](compute/README.md).
+Do not run manual updates concurrently with automated deployments.
 
 Target: Ubuntu 24.04, e2-medium (4 GiB), 30 GiB balanced persistent disk.
 Keep the VM near kwonserver and PostgreSQL. This is a single-node MVP deployment,

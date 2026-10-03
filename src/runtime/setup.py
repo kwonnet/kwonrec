@@ -3,6 +3,7 @@
 Run once before starting the connected worker; safe to rerun after interruption.
 No application rows are deleted or rewritten.
 """
+import argparse
 import logging
 from pathlib import Path
 import psycopg
@@ -14,6 +15,9 @@ from .worker import bootstrap, bootstrap_history, process_batch
 
 
 def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--skip-bootstrap", action="store_true", help="Install triggers without repeating an existing backfill")
+    args = parser.parse_args()
     logging.basicConfig(level=logging.INFO)
     config = settings()
     if not config.database_url:
@@ -27,10 +31,11 @@ def main():
             migration = Path(__file__).resolve().parents[2] / "sql" / "001_outbox.sql"
             logging.info("Installing recommendation outbox triggers")
             connection.execute(migration.read_text())
-            logging.info("Indexing recent posts")
-            bootstrap(connection, engine)
-            logging.info("Importing recent interactions")
-            bootstrap_history(connection, engine)
+            if not args.skip_bootstrap:
+                logging.info("Indexing recent posts")
+                bootstrap(connection, engine)
+                logging.info("Importing recent interactions")
+                bootstrap_history(connection, engine)
             # Bound setup work; the continuous worker drains any remaining backlog.
             for _ in range(100):
                 if not process_batch(connection, engine):

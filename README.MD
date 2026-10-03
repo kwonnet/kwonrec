@@ -8,7 +8,8 @@ This implementation updates user interests and post co-engagement statistics con
 
 ## Run locally
 
-For the single-VM deployment, see [Compute Engine deployment](deploy/COMPUTE_ENGINE.md).
+For push-to-deploy automation, see [Automated Compute Engine deployment](deploy/compute/README.md).
+The [manual deployment guide](deploy/COMPUTE_ENGINE.md) remains available for existing installations.
 
 ```sh
 cp .env.example .env

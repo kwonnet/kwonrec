@@ -34,7 +34,7 @@ class Engine:
         client_type = RedisCluster if config.redis_cluster else Redis
         self.redis = client or client_type.from_url(
             config.redis_url, decode_responses=True, socket_timeout=2,
-            socket_connect_timeout=2, max_connections=100,
+            socket_connect_timeout=2, max_connections=config.redis_max_connections,
             health_check_interval=30,
         )
         self.ttl = config.history_days * 86400

@@ -1,5 +1,10 @@
 name: KwonRec tests
-on: [push, pull_request]
+on:
+  push:
+    branches-ignore: [main]
+  pull_request:
+  workflow_call:
+  workflow_dispatch:
 jobs:
   test:
     runs-on: ubuntu-latest
@@ -24,6 +29,6 @@ jobs:
       - uses: actions/setup-python@v5
         with: {python-version: '3.12', cache: pip}
       - run: pip install -r requirements-dev.txt
-      - run: ruff check src/runtime src/main.py tests scripts
+      - run: ruff check src/runtime src/main.py tests scripts deploy/compute
       - run: pytest -q
       - run: docker build -t kwonrec:ci .

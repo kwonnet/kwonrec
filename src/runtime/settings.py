@@ -8,6 +8,7 @@ class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_prefix="KWONREC_", env_file=".env", extra="ignore")
     redis_url: str = "redis://localhost:6379/0"
     redis_cluster: bool = False
+    redis_max_connections: int = Field(default=16, ge=1, le=1000)
     api_key: str = ""
     allow_unauthenticated: bool = False
     database_url: str = ""
