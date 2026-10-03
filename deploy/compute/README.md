@@ -71,7 +71,9 @@ It leaves kwonserver, wallet Redis and Caddy alone. API joins kwonserver-product
 
 Stop workers on OTHER VMs/Cloud Run consuming this outbox into a different Redis
 before moving the service. Back up Redis. Setup installs triggers each release;
-first automation run bootstraps and replays retained history. Later runs skip the
+first automation run bootstraps and replays retained history. Replay processes events
+one by one and can be slow with a remote database. CI streams batch last_id/high_water
+counters and a 30-second process heartbeat; a heartbeat alone does not prove progress. Later runs skip the
 backfill when database/Redis/namespace settings are unchanged. A failed setup does
 not advance its marker. After Redis loss, diagnose/restore it, remove
 /opt/kwonrec/setup-target and rerun to rebuild retained data.

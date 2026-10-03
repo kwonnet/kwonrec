@@ -69,7 +69,7 @@ run_setup() {
   local stage="$1"
   shift
   echo "Kwonrec deployment: $stage"
-  if dc run --rm setup "$@" >> "$WORK/setup.log" 2>&1; then
+  if dc run --rm setup "$@" 2>&1 | python3 "$BUNDLE/setup-progress.py" "$WORK/setup.log"; then
     return 0
   else
     local status=$?

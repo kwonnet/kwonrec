@@ -71,10 +71,11 @@ def test_setup_failure_reports_outside_redirection_and_restores_worker(tmp_path)
     wrapper = script[script.index('run_setup() {'):script.index('# Install/upgrade triggers each time;')]
     harness = '''set -Eeuo pipefail
 WORK="$1"
+BUNDLE="$2"
 dc() { echo 'captured setup exception'; return 23; }
 restore_previous() { echo 'recovery invoked' >&2; cat "$WORK/setup.log" >&2; }
 ''' + wrapper + '\nrun_setup "Bootstrap probe"\necho UNEXPECTED_SUCCESS\n'
-    result = subprocess.run(['bash', '-c', harness, 'test', str(tmp_path)], capture_output=True, text=True)
+    result = subprocess.run(['bash', '-c', harness, 'test', str(tmp_path), str(Path('deploy/compute').resolve())], capture_output=True, text=True)
     assert result.returncode == 23
     assert 'Bootstrap probe' in result.stderr
     assert 'captured setup exception' in result.stderr
@@ -88,10 +89,21 @@ def test_successful_setup_continues_without_recovery(tmp_path):
     wrapper = script[script.index('run_setup() {'):script.index('# Install/upgrade triggers each time;')]
     harness = '''set -Eeuo pipefail
 WORK="$1"
+BUNDLE="$2"
 dc() { echo 'setup complete'; }
 restore_previous() { echo UNEXPECTED_RECOVERY; }
 ''' + wrapper + '\nrun_setup "Bootstrap probe"\necho SUCCESS\n'
-    result = subprocess.run(['bash', '-c', harness, 'test', str(tmp_path)], capture_output=True, text=True)
+    result = subprocess.run(['bash', '-c', harness, 'test', str(tmp_path), str(Path('deploy/compute').resolve())], capture_output=True, text=True)
     assert result.returncode == 0
     assert 'SUCCESS' in result.stdout
     assert 'UNEXPECTED_RECOVERY' not in result.stdout
+
+
+def test_setup_progress_streams_counters_without_credentials(tmp_path):
+    import io
+    emitted = []
+    source = io.StringIO('password=private-secret\nINFO:kwonrec.worker:replay batch=100 last_id=200 high_water=900\n')
+    log = tmp_path / 'setup.log'
+    module('setup-progress').stream(source, log, emit=lambda text, **kw: emitted.append(text))
+    assert emitted == ['replay batch=100 last_id=200 high_water=900']
+    assert 'private-secret' in log.read_text()  # Kept only in the private deployment directory.
